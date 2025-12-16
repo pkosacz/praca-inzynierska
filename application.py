@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import threading
 from pathlib import Path
 import datetime as dt
@@ -116,7 +116,10 @@ def plot_results(test_signal, rec_signal, ir_signal):
     2. Sygnał nagrany
     3. Obliczona odpowiedź impulsowa (IR)
     """
-    fig, ax = plt.subplots(3, 1, figsize=(10, 12))
+    number_ir_channels = ir_signal.cshape[0]
+    total_plots = 2 + number_ir_channels
+
+    fig, ax = plt.subplots(total_plots, 1, figsize=(10, 3 * total_plots), constrained_layout=True)
 
     # 1. Sygnał testowy (input)
     pf.plot.time(test_signal, ax=ax[0], dB=False, unit='s')
@@ -129,20 +132,22 @@ def plot_results(test_signal, rec_signal, ir_signal):
     ax[1].set_ylabel("Amplituda")
 
     # 3. Odpowiedź Impulsowa
-    pf.plot.time(ir_signal, ax=ax[2], dB=True, unit='s')
-    ax[2].set_title("3. Obliczona Odpowiedź Impulsowa")
-    ax[2].set_ylabel("Amplituda (dB)")
-
-    plt.tight_layout()
+    for i in range(number_ir_channels):
+        plot_index = 2 + i
+        current_ir_channel = ir_signal[i]
+        pf.plot.time(current_ir_channel, ax=ax[plot_index], dB=True, unit='s')
+        ax[plot_index].set_title(f"3.{i+1} Obliczona Odpowiedź Impulsowa - Kanał {i+1}")
+        ax[plot_index].set_ylabel("Amplituda (dB)")
 
     plt.show()
-
 
 class ImpulseResponseApplication:
     def __init__(self, root):
         self.root = root
         self.root.title("Aplikacja do Pomiaru IR")
-        self.root.geometry("500x450")
+        self.root.geometry("500x650")
+
+        self.output_dir = Path("ir_session").resolve()
 
         self.device_list = sd.query_devices()
         self.host_apis = sd.query_hostapis()
@@ -160,14 +165,52 @@ class ImpulseResponseApplication:
 
         self.get_device_lists()
 
-        frame_params = ttk.Frame(root)
-        frame_params.pack(pady=10)
+        ttk.Label(root, text='Wybierz Sygnał Testowy:').pack(pady=(10, 2))
+        self.signal_var = tk.StringVar(value="ESS")
+        self.signal_combo = ttk.Combobox(root, width=20, textvariable=self.signal_var, state="readonly")
+        self.signal_combo["values"] = ("ESS", "MLS")
+        self.signal_combo.pack(pady=5)
+        self.signal_combo.bind("<<ComboboxSelected>>", self.toggle_mls_order_field)
 
-        ttk.Label(frame_params, text="Czas trwania (s):").pack(side="left", padx=5)
+        self.params_container = ttk.Frame(root)
+        self.params_container.pack(pady=5)
 
-        self.duration_entry = ttk.Entry(frame_params, width=10)
+        self.frame_duration = ttk.Frame(self.params_container)
+        ttk.Label(self.frame_duration, text="Czas trwania ESS (s):").pack(side="left", padx=5)
+        self.duration_entry = ttk.Entry(self.frame_duration, width=10)
         self.duration_entry.insert(0, "5.0")
         self.duration_entry.pack(side="left", padx=5)
+
+        self.frame_mls_order = ttk.Frame(self.params_container)
+        self.mls_label = ttk.Label(self.frame_mls_order, text="Rząd MLS (np. 10):")
+        self.mls_label.pack(side="left", padx=5)
+        self.mls_order_entry = ttk.Entry(self.frame_mls_order, width=10)
+        self.mls_order_entry.insert(0, "10")
+        self.mls_order_entry.pack(side="left", padx=5)
+
+        self.toggle_mls_order_field()
+
+        self.position_frame = ttk.Frame(root)
+        self.position_frame.pack(pady=5)
+
+        ttk.Label(self.position_frame, text="Source").pack(side="left", padx=(0, 5))
+        self.source_id = tk.IntVar(value=1)
+        self.source_spin = ttk.Spinbox(self.position_frame, from_=1, to=10, textvariable=self.source_id, width=4, state="readonly")
+        self.source_spin.pack(side="left", padx=(0, 20))
+
+        ttk.Label(self.position_frame, text="Receiver").pack(side="left", padx=(0, 5))
+        self.receiver_id = tk.IntVar(value=1)
+        self.receiver_spin = ttk.Spinbox(self.position_frame, from_=1, to=10, textvariable=self.receiver_id, width=4, state="readonly")
+        self.receiver_spin.pack(side="left")
+
+        self.folder_frame = ttk.LabelFrame(root, text="Lokaliacja Zapisu")
+        self.folder_frame.pack(pady=10, padx=10, fill="x")
+
+        self.button_browse = ttk.Button(self.folder_frame, text="Wybierz folder", command=self.choose_directory)
+        self.button_browse.pack(side="left", pady=5, padx=5)
+
+        self.path_label = ttk.Label(self.folder_frame, text=str(self.output_dir), wraplength=350)
+        self.path_label.pack(side="left", pady=5, padx=5)
 
         self.start_btn = ttk.Button(root, text="ROZPOCZNIJ POMIAR", command=self.start_measurement_thread)
         self.start_btn.pack(pady=20, ipady=5)
@@ -175,7 +218,22 @@ class ImpulseResponseApplication:
         self.log_text = tk.Text(root, height=8, width=55, state='disabled')
         self.log_text.pack(pady=5)
 
-        self.log("Gotowy do pracy. Wybierz urządzenia.")
+        self.log("Gotowy do pracy. Wybierz urządzenia i sygnał testowy.")
+
+    def choose_directory(self):
+        selected_dir = filedialog.askdirectory(initialdir=self.output_dir)
+        if selected_dir:
+            self.output_dir = Path(selected_dir)
+            self.path_label.config(text=str(self.output_dir))
+            self.log(f"Zmieniono ścieżkę zapisu na {self.output_dir.name}")
+
+    def toggle_mls_order_field(self, event=None):
+        if self.signal_var.get() == "MLS":
+            self.frame_duration.pack_forget()
+            self.frame_mls_order.pack(pady=5)
+        else:
+            self.frame_mls_order.pack_forget()
+            self.frame_duration.pack(pady=5)
 
     def log(self, message):
         self.log_text.config(state='normal')
@@ -227,6 +285,7 @@ class ImpulseResponseApplication:
         try:
             input_index = self.input_combo.current()
             output_index = self.output_combo.current()
+            signal_type = self.signal_var.get()
 
             if input_index == -1 or output_index == -1:
                 messagebox.showerror("Błąd", "Nie wybrano urządzeń!")
@@ -246,15 +305,38 @@ class ImpulseResponseApplication:
             in_channels = 2
 
             self.log(f"--- START POMIARU ---")
-            self.log(f"In: {id_in}, Out: {id_out}, Czas: {duration}s")
+            self.log(f"In: {id_in}, Out: {id_out}")
 
-            self.log("Generowanie sygnału testowego")
-            ess = generate_ess(f1, f2, duration, fs)
-            ess_padded = pf.dsp.pad_zeros(ess, pad_width=int(1.0 * fs))
+            test_signal = None
+            duration_ir_padding = 1.0
+
+            if signal_type == "ESS":
+                try:
+                    duration = float(self.duration_entry.get())
+                except ValueError:
+                    duration = 10.0
+
+                self.log(f"Generowanie ESS (Czas: {duration}s)")
+                ess = generate_ess(f1, f2, duration, fs)
+                test_signal = pf.dsp.pad_zeros(ess, pad_width=int(duration_ir_padding * fs))
+
+            elif signal_type == "MLS":
+                try:
+                    order = int(self.mls_order_entry.get())
+                except ValueError:
+                    order = 10
+
+                self.log(f"Generowanie MLS (Rząd: {order}")
+                mls = generate_mls(order, fs)
+                test_signal = pf.dsp.pad_zeros(mls, pad_width=int(duration_ir_padding * fs))
+
+            if test_signal is None:
+                messagebox.showerror("Błąd", "Nie udało się wygenerować sygnału testowego")
+                return
 
             self.log("Nagrywanie w toku")
             recording = play_and_record(
-                ess_padded,
+                test_signal,
                 in_channels=in_channels,
                 device=(id_in, id_out),
                 blocking=True
@@ -262,10 +344,11 @@ class ImpulseResponseApplication:
             self.log("Nagrywanie zakończone")
 
             self.log("Obliczanie odpowiedzi impulsowej")
+
             ir_a_format = pf.dsp.deconvolve(
                 system_output=recording,
-                system_input=ess_padded,
-                frequency_range=(f1, f2),
+                system_input=test_signal,
+                frequency_range=(f1, f2) if signal_type == "ESS" else None,
             )
 
             try:
@@ -276,15 +359,21 @@ class ImpulseResponseApplication:
 
             ir_final = convert_a_to_b_format(ir_aligned)
 
-            outdir = Path("ir_session")
+            source_value = self.source_id.get()
+            receiver_value = self.receiver_id.get()
+
+            outdir = self.output_dir
             ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            file_prefix = f"S{source_value}_R{receiver_value}_{ts}"
+
             outdir.mkdir(parents=True, exist_ok=True)
 
-            sweep_path = outdir / f"sygnal_testowy_{ts}.wav"
-            rec_path = outdir / f"nagranie_{ts}.wav"
-            ir_path = outdir / f"IR_{ts}.wav"
+            sweep_path = outdir / f"sygnal_testowy_{file_prefix}.wav"
+            rec_path = outdir / f"nagranie_{file_prefix}.wav"
+            ir_path = outdir / f"IR_{file_prefix}.wav"
 
-            save_wav(sweep_path, ess_padded)
+            save_wav(sweep_path, test_signal)
             save_wav(rec_path, recording)
             pfio.write_audio(ir_final, str(ir_path), "FLOAT")
 
@@ -293,7 +382,7 @@ class ImpulseResponseApplication:
             self.log(f"Nagranie: {rec_path}")
             self.log(f"IR: {ir_path}")
 
-            self.root.after(0, self.finish_measurement, ess_padded, recording, ir_final)
+            self.root.after(0, self.finish_measurement, test_signal, recording, ir_final)
 
         except Exception as e:
             self.log(f"BŁĄD: {e}")
