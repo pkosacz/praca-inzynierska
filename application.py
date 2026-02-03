@@ -1,3 +1,4 @@
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
@@ -59,12 +60,13 @@ def audio_array_to_signal(x, fs):
 
 def convert_a_to_b_format(signal_a_format):
     conversion_matrix = np.array([
-        #[1.0, 1.0, 1.0, 1.0],   # W
-        #[1.0, 1.0, -1.0, -1.0], # X
-        #[1.0, -1.0, 1.0, -1.0], # Y
-        #[1.0, -1.0, -1.0, 1.0]  # Z
-        [1.0, 1.0],
-        [1.0, -1.0]
+        [1.0, 1.0, 1.0, 1.0],   # W
+        [1.0, 1.0, -1.0, -1.0], # X
+        [1.0, -1.0, 1.0, -1.0], # Y
+        [1.0, -1.0, -1.0, 1.0]  # Z
+        # [1.0]
+        # [1.0, 1.0],
+        # [1.0, 1.0]
     ])
 
     data = signal_a_format.time
@@ -145,9 +147,10 @@ class ImpulseResponseApplication:
     def __init__(self, root):
         self.root = root
         self.root.title("Aplikacja do Pomiaru IR")
-        self.root.geometry("500x650")
+        self.root.geometry("600x700")
+        self.root.minsize(500, 650)
 
-        self.output_dir = Path("ir_session").resolve()
+        self.output_dir = Path("../ir_session").resolve()
 
         self.device_list = sd.query_devices()
         self.host_apis = sd.query_hostapis()
@@ -156,12 +159,12 @@ class ImpulseResponseApplication:
         self.output_device_ids = []
 
         ttk.Label(root, text="Wybierz Urządzenie Wejściowe (Input):").pack(pady=(10, 2))
-        self.input_combo = ttk.Combobox(root, width=70, state="readonly")
-        self.input_combo.pack(pady=5)
+        self.input_combo = ttk.Combobox(root, state="readonly")
+        self.input_combo.pack(pady=5, padx=10, fill='x')
 
         ttk.Label(root, text="Wybierz Urządzenie Wyjściowe (Output):").pack(pady=(10, 2))
-        self.output_combo = ttk.Combobox(root, width=70, state="readonly")
-        self.output_combo.pack(pady=5)
+        self.output_combo = ttk.Combobox(root, state="readonly")
+        self.output_combo.pack(pady=5, padx=10, fill='x')
 
         self.get_device_lists()
 
@@ -190,33 +193,55 @@ class ImpulseResponseApplication:
 
         self.toggle_mls_order_field()
 
+        self.sample_rate_frame = ttk.Frame(root)
+        self.sample_rate_frame.pack(pady=5)
+
+        ttk.Label(self.sample_rate_frame, text="Częstotliwość próbkowania (Hz):").pack(side="left", padx=5)
+
+        self.sample_rate_var = tk.StringVar(value="48000")
+        self.sample_rate_combo = ttk.Combobox(self.sample_rate_frame, textvariable=self.sample_rate_var, state="readonly", width=10)
+        self.sample_rate_combo["values"] = ("48000", "44100", "96000")
+        self.sample_rate_combo.current(0)
+        self.sample_rate_combo.pack(side="left", padx=5)
+
         self.position_frame = ttk.Frame(root)
         self.position_frame.pack(pady=5)
 
-        ttk.Label(self.position_frame, text="Source").pack(side="left", padx=(0, 5))
+        ttk.Label(self.position_frame, text="Source:").pack(side="left", padx=(0, 5))
         self.source_id = tk.IntVar(value=1)
         self.source_spin = ttk.Spinbox(self.position_frame, from_=1, to=10, textvariable=self.source_id, width=4, state="readonly")
         self.source_spin.pack(side="left", padx=(0, 20))
 
-        ttk.Label(self.position_frame, text="Receiver").pack(side="left", padx=(0, 5))
+        ttk.Label(self.position_frame, text="Receiver:").pack(side="left", padx=(0, 5))
         self.receiver_id = tk.IntVar(value=1)
         self.receiver_spin = ttk.Spinbox(self.position_frame, from_=1, to=10, textvariable=self.receiver_id, width=4, state="readonly")
         self.receiver_spin.pack(side="left")
 
+        self.averages_frame = ttk.Frame(root)
+        self.averages_frame.pack(pady=5)
+
+        ttk.Label(self.averages_frame, text="Liczba uśrednień:").pack(side="left", padx=(0, 5))
+        self.averages_value = tk.IntVar(value=1)
+        self.averages_spin = ttk.Spinbox(self.averages_frame, from_=1, to=5, textvariable=self.averages_value, width=4, state="readonly")
+        self.averages_spin.pack(side="left")
+
         self.folder_frame = ttk.LabelFrame(root, text="Lokaliacja Zapisu")
-        self.folder_frame.pack(pady=10, padx=10, fill="x")
+        self.folder_frame.pack(pady=10, padx=10, fill="x", expand=True)
 
         self.button_browse = ttk.Button(self.folder_frame, text="Wybierz folder", command=self.choose_directory)
         self.button_browse.pack(side="left", pady=5, padx=5)
 
-        self.path_label = ttk.Label(self.folder_frame, text=str(self.output_dir), wraplength=350)
-        self.path_label.pack(side="left", pady=5, padx=5)
+        self.path_label = ttk.Label(self.folder_frame, text=str(self.output_dir))
+        self.path_label.pack(side="left", pady=5, padx=5, fill='x', expand=True)
+        def on_label_resize(event):
+            self.path_label.config(wraplength=event.width - 5)
+        self.path_label.bind('<Configure>', on_label_resize)
 
         self.start_btn = ttk.Button(root, text="ROZPOCZNIJ POMIAR", command=self.start_measurement_thread)
-        self.start_btn.pack(pady=20, ipady=5)
+        self.start_btn.pack(pady=20, ipady=5, padx=50, fill='x')
 
-        self.log_text = tk.Text(root, height=8, width=55, state='disabled')
-        self.log_text.pack(pady=5)
+        self.log_text = tk.Text(root, height=8, state='disabled')
+        self.log_text.pack(pady=(5, 10), padx=10, fill='both', expand=True)
 
         self.log("Gotowy do pracy. Wybierz urządzenia i sygnał testowy.")
 
@@ -286,6 +311,7 @@ class ImpulseResponseApplication:
             input_index = self.input_combo.current()
             output_index = self.output_combo.current()
             signal_type = self.signal_var.get()
+            averages_value = self.averages_value.get()
 
             if input_index == -1 or output_index == -1:
                 messagebox.showerror("Błąd", "Nie wybrano urządzeń!")
@@ -299,16 +325,18 @@ class ImpulseResponseApplication:
             except ValueError:
                 duration = 5.0
 
-            fs = 48000
+            fs = int(self.sample_rate_var.get())
+
             f1 = 20.0
             f2 = 20000.0
-            in_channels = 2
+            in_channels = 4
 
             self.log(f"--- START POMIARU ---")
-            self.log(f"In: {id_in}, Out: {id_out}")
+            self.log(f"ID in: {id_in}, ID out: {id_out}")
 
             test_signal = None
-            duration_ir_padding = 1.0
+            duration_ir_padding = 0.0
+            # duration_ir_padding = 1.0
 
             if signal_type == "ESS":
                 try:
@@ -326,7 +354,7 @@ class ImpulseResponseApplication:
                 except ValueError:
                     order = 10
 
-                self.log(f"Generowanie MLS (Rząd: {order}")
+                self.log(f"Generowanie MLS (Rząd: {order})")
                 mls = generate_mls(order, fs)
                 test_signal = pf.dsp.pad_zeros(mls, pad_width=int(duration_ir_padding * fs))
 
@@ -335,37 +363,37 @@ class ImpulseResponseApplication:
                 return
 
             self.log("Nagrywanie w toku")
-            recording = play_and_record(
-                test_signal,
-                in_channels=in_channels,
-                device=(id_in, id_out),
-                blocking=True
-            )
-            self.log("Nagrywanie zakończone")
+            recording_sum = None
+            for i in range(averages_value):
+                recording = play_and_record(
+                    test_signal,
+                    in_channels=in_channels,
+                    device=(id_in, id_out),
+                    blocking=True
+                )
 
-            self.log("Obliczanie odpowiedzi impulsowej")
+                if recording_sum is None:
+                    recording_sum = recording
+                else:
+                    recording_sum += recording
+
+            averaged_recording = recording_sum / averages_value
 
             ir_a_format = pf.dsp.deconvolve(
-                system_output=recording,
+                system_output=averaged_recording,
                 system_input=test_signal,
                 frequency_range=(f1, f2) if signal_type == "ESS" else None,
             )
 
-            try:
-                start_sample = pf.dsp.find_impulse_response_start(ir_a_format, threshold=20)
-                ir_aligned = pf.dsp.time_shift(ir_a_format, -start_sample[0])
-            except:
-                ir_aligned = ir_a_format
-
-            ir_final = convert_a_to_b_format(ir_aligned)
+            ir_final = convert_a_to_b_format(ir_a_format)
 
             source_value = self.source_id.get()
             receiver_value = self.receiver_id.get()
 
             outdir = self.output_dir
-            ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-            file_prefix = f"S{source_value}_R{receiver_value}_{ts}"
+            file_prefix = (f"S{source_value}_R{receiver_value}_{ts}_avg{averages_value}_{signal_type}")
 
             outdir.mkdir(parents=True, exist_ok=True)
 
@@ -373,8 +401,8 @@ class ImpulseResponseApplication:
             rec_path = outdir / f"nagranie_{file_prefix}.wav"
             ir_path = outdir / f"IR_{file_prefix}.wav"
 
-            save_wav(sweep_path, test_signal)
-            save_wav(rec_path, recording)
+            # save_wav(sweep_path, test_signal)
+            save_wav(rec_path, averaged_recording)
             pfio.write_audio(ir_final, str(ir_path), "FLOAT")
 
             self.log("Zapisano pliki")
@@ -382,7 +410,7 @@ class ImpulseResponseApplication:
             self.log(f"Nagranie: {rec_path}")
             self.log(f"IR: {ir_path}")
 
-            self.root.after(0, self.finish_measurement, test_signal, recording, ir_final)
+            self.root.after(0, self.finish_measurement, test_signal, averaged_recording, ir_final)
 
         except Exception as e:
             self.log(f"BŁĄD: {e}")
